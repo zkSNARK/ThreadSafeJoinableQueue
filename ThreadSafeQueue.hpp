@@ -152,6 +152,11 @@ public:
     m_condition.notify_all();
   }
   
+  
+  /**
+   * join allows a user to wait on the completion of the 
+   * jobs remaining in the queue
+   */
   void join() {
     std::unique_lock<std::mutex> lock{m_mutex}; // requires unique for
     
