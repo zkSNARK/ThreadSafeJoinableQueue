@@ -18,15 +18,14 @@
 
 
 /**
- *  ThreadSafeQueue class.
+ *  locked_opt_queue class.
  *
  *  A wrapper around std::queue which provides safe threaded access.
  *
- *  This queue uses mutexs and its "pop" method is implemented in
- *  terms of nonstd::optional as an experiment.
+ *  Attempts to mimic the behavior of the python queue.
  */
 template <typename T>
-class locked_opt_queue
+class ThreadSafeQueue
 {
 public:
   
@@ -34,38 +33,9 @@ public:
    * Destructor.  Invalidate so that any threads waiting on the
    * condition are notified.
    */
-  ~locked_opt_queue()
+  ~ThreadSafeQueue()
   {
     stop();
-  }
-  
-  /**
-   * Wait on queue condition variable indefinitely until the queue
-   * is marked for stop or a value is pushed into the queue.
-   */
-  std::optional<T> wait_pop() {
-    std::unique_lock<std::mutex> lock{m_mutex}; // requires unique for
-    
-    if (m_joined) {
-      return {};
-    }
-    
-    // use wait(lock, predicate) to handle spurious wakeup and
-    // termination condition
-    m_condition.wait(lock,
-      [this]() {
-        return !m_queue.empty() or m_joined;
-      }
-    );
-    
-    if (m_joined) {
-      return {};        // return a failed option
-    }
-    
-    T out = std::move(m_queue.front());
-    m_queue.pop();
-    
-    return out;
   }
   
   /**
@@ -105,7 +75,7 @@ public:
    */
   bool push(T value)
   {
-    std::unique_lock<std::mutex> lock{m_mutex};
+    std::unique_lock<std::mutex> lock { m_mutex };
     
     if(m_joined) {
       return false;
@@ -123,7 +93,7 @@ public:
    */
   bool empty() const
   {
-    std::scoped_lock<std::mutex> lock{m_mutex};
+    std::scoped_lock<std::mutex> lock { m_mutex };
     return m_queue.empty();
   }
   
@@ -132,7 +102,7 @@ public:
    *
    */
   bool complete(){
-    std::scoped_lock<std::mutex> lock{m_mutex};
+    std::scoped_lock<std::mutex> lock { m_mutex };
     return m_joined and m_queue.empty();
   }
   
@@ -140,7 +110,8 @@ public:
    * Shut the queue down by marking the valid bit false and
    * notify any waiting threads.
    *
-   * All further calls to the queue will result in undefined behavior.
+   * Stop only marks the queue for stopped state.  Doing this
+   * disables any further pushes into the queue and
    */
   void stop()
   {
@@ -154,11 +125,11 @@ public:
   
   
   /**
-   * join allows a user to wait on the completion of the 
+   * join allows a user to wait on the completion of the
    * jobs remaining in the queue
    */
   void join() {
-    std::unique_lock<std::mutex> lock{m_mutex}; // requires unique for
+    std::scoped_lock<std::mutex> lock { m_mutex };
     
     m_joined = true;
     
@@ -176,11 +147,14 @@ public:
   }
   
   /**
-   * Returns the current size of the queue.
+   * Returns the current size of the queue.  Users should be
+   * aware that this does not show users true state because
+   * as soon as this function exits, the size can change do
+   * to the release of the lock.
    */
   inline auto size() const
   {
-    std::scoped_lock<std::mutex> lock{m_mutex};
+    std::scoped_lock<std::mutex> lock { m_mutex };
     return m_queue.size();
   }
   
@@ -191,7 +165,5 @@ private:
   // it tells the const functions "except me... I'm not const."
   mutable std::mutex m_mutex;
   std::condition_variable m_condition;
-  std::atomic_bool m_joined{false};
-  
+  std::atomic_bool m_joined { false };
 };
-
