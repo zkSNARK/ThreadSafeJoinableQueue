@@ -33,8 +33,7 @@ public:
    * Destructor.  Invalidate so that any threads waiting on the
    * condition are notified.
    */
-  ~ThreadSafeQueue()
-  {
+  ~ThreadSafeQueue() {
     stop();
   }
   
@@ -43,20 +42,29 @@ public:
    * is marked for stop or a value is pushed into the queue.
    */
   std::optional<T> get() {
-    std::unique_lock<std::mutex> lock { m_mutex }; // requires unique for
+    std::unique_lock<std::mutex> lock { m_mutex };
     
+    // if the queue is empty and has been joined, the queue
+    // is no longer valid (could throw here).  Currently
+    // returning a failed option.
     if (m_joined and m_queue.size() == 0) {
       return {};
     }
     
     // use wait(lock, predicate) to handle spurious wakeup and
-    // termination condition
+    // termination condition.  We wake up when the queue is not
+    // empty or the queue has been joined and is empty.
     m_condition.wait(lock,
       [this]() {
         return !m_queue.empty() or (m_joined and m_queue.empty());
       }
     );
     
+    // If we woke up from the condition variable and the queue
+    // has been joined and is empty, that meand the queue is 
+    // invalid.  Again, could throw here. 
+    // We could get here due to spurious wake up or due to the
+    // notify from the join call.
     if (m_joined and m_queue.size() == 0) {
       return {};        // return a failed option
     }
@@ -129,7 +137,7 @@ public:
    * jobs remaining in the queue
    */
   void join() {
-    std::scoped_lock<std::mutex> lock { m_mutex };
+    std::unique_lock<std::mutex> lock { m_mutex };
     
     m_joined = true;
     
